@@ -145,7 +145,7 @@ export default function TaskManagementPage() {
       </div>
       {/* Only show TaskForm for non-user roles */}
       {currentUser?.role !== 'user' && (
-        <TaskForm orders={orders} onSubmit={handleCreateTask} userRole={currentUser?.role} selectedOrder={selectedOrder} />
+        <TaskForm orders={orders} onSubmit={handleCreateTask} selectedOrder={selectedOrder} />
       )}
       <TaskTable tasks={tasks} onStatusChange={handleStatusChange} />
     </div>

@@ -139,6 +139,7 @@ export default function POManagementPage() {
     }
   };
 
+  // Helper to open the Create PO modal and fetch customers/products
   const openCreateModal = async () => {
     setShowCreateModal(true);
     try {
@@ -153,11 +154,6 @@ export default function POManagementPage() {
     }
   };
 
-  const openTaskModal = (poId: string) => {
-    setTaskPOId(poId);
-    setShowTaskModal(true);
-    setNewTask({ type: '', assignedTo: '', details: '', deadline: '' });
-  };
 
   const handleCreateTask = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -309,7 +305,7 @@ export default function POManagementPage() {
                     <button onClick={() => handleAdvance(order.id, 'delivered')} className="btn-primary btn-xs">Mark as Delivered</button>
                   )}
                   {/* Generate Invoice: only for manager, delivered, not cancelled, invoice not generated */}
-                  {currentUser?.role === 'manager' && order.status === 'delivered' && !order.invoiceUrl && order.status !== 'cancelled' && (
+                  {currentUser?.role === 'manager' && order.status === 'delivered' && !order.invoiceUrl && (
                     <button onClick={() => handleGenerateInvoice(order.id)} className="btn-primary btn-xs">Generate Invoice</button>
                   )}
                   {/* Cancel: only for manager, pending/processing, not delivered/cancelled */}
