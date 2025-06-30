@@ -4,7 +4,7 @@ export interface Task {
   _id: string;
   orderId: string;
   type: string;
-  assignedTo: string;
+  assignedTo: string | { name?: string; email?: string; _id?: string };
   details: string;
   status: string;
   deadline: string;
@@ -41,7 +41,11 @@ export const TaskTable: React.FC<TaskTableProps> = ({ tasks, onStatusChange }) =
         {tasks.map((task) => (
           <tr key={task._id} className="border-b">
             <td className="px-2 py-1">{task.type}</td>
-            <td className="px-2 py-1">{task.assignedTo}</td>
+            <td className="px-2 py-1">
+              {typeof task.assignedTo === 'object' && task.assignedTo !== null
+                ? (task.assignedTo.name || task.assignedTo.email || task.assignedTo._id)
+                : task.assignedTo}
+            </td>
             <td className="px-2 py-1">{task.details}</td>
             <td className="px-2 py-1">
               <span className={`px-2 py-1 rounded text-xs font-semibold ${statusColors[task.status] || ''}`}>

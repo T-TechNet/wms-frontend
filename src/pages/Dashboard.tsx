@@ -26,11 +26,14 @@ ChartJS.register(
 interface DashboardStats {
   totalProducts: number;
   lowStockProducts: number;
-  totalOrders?: number;
+  totalPOs?: number;
   totalRevenue?: number;
   totalCustomers?: number;
   totalTasks: number;
   completedTasks: number;
+  pendingTasks?: number;
+  inProgressTasks?: number;
+  completedTasksCount?: number;
 }
 
 interface StockData {
@@ -93,9 +96,9 @@ export default function Dashboard() {
     datasets: [
       {
         data: [
-          taskData.filter(t => t.status === 'pending').length,
-          taskData.filter(t => t.status === 'in-progress').length,
-          taskData.filter(t => t.status === 'completed').length,
+          stats?.pendingTasks ?? taskData.filter(t => t.status === 'pending').length,
+          stats?.inProgressTasks ?? taskData.filter(t => t.status === 'in-progress').length,
+          stats?.completedTasksCount ?? taskData.filter(t => t.status === 'completed').length,
         ],
         backgroundColor: [
           'rgba(239, 68, 68, 0.5)',
@@ -143,6 +146,22 @@ export default function Dashboard() {
             <p className="text-3xl font-bold mt-2">{stats.totalCustomers}</p>
           </div>
         )}
+        <div className="card bg-gradient-to-br from-blue-500 to-blue-600 text-white">
+          <h3 className="text-lg font-medium">Total POs</h3>
+          <p className="text-3xl font-bold mt-2">{stats?.totalPOs}</p>
+        </div>
+        <div className="card bg-gradient-to-br from-yellow-500 to-yellow-600 text-white">
+          <h3 className="text-lg font-medium">Pending Tasks</h3>
+          <p className="text-3xl font-bold mt-2">{stats?.pendingTasks}</p>
+        </div>
+        <div className="card bg-gradient-to-br from-orange-500 to-orange-600 text-white">
+          <h3 className="text-lg font-medium">In Progress Tasks</h3>
+          <p className="text-3xl font-bold mt-2">{stats?.inProgressTasks}</p>
+        </div>
+        <div className="card bg-gradient-to-br from-green-500 to-green-600 text-white">
+          <h3 className="text-lg font-medium">Completed Tasks</h3>
+          <p className="text-3xl font-bold mt-2">{stats?.completedTasksCount}</p>
+        </div>
       </div>
 
       {/* Charts Grid */}

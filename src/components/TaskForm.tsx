@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { apiRequest } from '../api';
 
 export interface TaskFormValues {
   orderId: string;
@@ -12,6 +13,8 @@ export interface TaskFormValues {
 interface TaskFormProps {
   orders: { _id: string; name?: string; orderNumber?: string }[];
   onSubmit: (values: TaskFormValues) => void;
+  userRole?: string;
+  selectedOrder?: string;
 }
 
 const typeOptions = ['Picking', 'Packing', 'Quality Check', 'Shipping'];
@@ -23,9 +26,9 @@ interface UserOption {
   email: string;
 }
 
-export const TaskForm: React.FC<TaskFormProps> = ({ orders, onSubmit }) => {
+export const TaskForm: React.FC<TaskFormProps> = ({ orders, onSubmit, userRole, selectedOrder }) => {
   const [form, setForm] = useState<TaskFormValues>({
-    orderId: orders[0]?._id || '',
+    orderId: selectedOrder || orders[0]?._id || '',
     type: typeOptions[0],
     assignedTo: '',
     details: '',
@@ -35,20 +38,30 @@ export const TaskForm: React.FC<TaskFormProps> = ({ orders, onSubmit }) => {
   const [users, setUsers] = useState<UserOption[]>([]);
 
   useEffect(() => {
-    // Fetch users for assignment dropdown
-    fetch('/api/users', {
-      headers: {
-        'Authorization': `Bearer ${localStorage.getItem('token')}`
-      }
-    })
-      .then(res => res.json())
+    // Fetch users for assignment dropdown using apiRequest
+    apiRequest('/api/users')
       .then(data => {
-        if (data.status === 'success' && Array.isArray(data.data)) {
-          setUsers(data.data);
+        if (Array.isArray(data)) {
+          setUsers(data);
+        } else if (
+          data &&
+          typeof data === 'object' &&
+          'data' in data &&
+          Array.isArray((data as { data: unknown }).data)
+        ) {
+          setUsers((data as { data: UserOption[] }).data);
         }
       })
       .catch(() => setUsers([]));
   }, []);
+
+  useEffect(() => {
+    // If selectedOrder changes, update form.orderId
+    if (selectedOrder && selectedOrder !== form.orderId) {
+      setForm(f => ({ ...f, orderId: selectedOrder }));
+    }
+    // eslint-disable-next-line
+  }, [selectedOrder]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     setForm({ ...form, [e.target.name]: e.target.value });

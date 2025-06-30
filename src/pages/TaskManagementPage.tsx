@@ -5,20 +5,45 @@ import { TaskForm } from '../components/TaskForm';
 import type { TaskFormValues } from '../components/TaskForm';
 import { TaskTable } from '../components/TaskTable';
 import type { Task } from '../components/TaskTable';
+import { useLocation } from 'react-router-dom';
 
 export default function TaskManagementPage() {
   const [tasks, setTasks] = useState<Task[]>([]);
   const [orders, setOrders] = useState<any[]>([]);
   const [selectedOrder, setSelectedOrder] = useState<string>('');
   const [loading, setLoading] = useState(true);
+  const [currentUser, setCurrentUser] = useState<any>(null);
+  const [showAllTasks, setShowAllTasks] = useState(false);
+  const location = useLocation();
 
   useEffect(() => {
+    // Fetch user from backend
+    apiRequest('/api/users/me')
+      .then((data) => setCurrentUser(data || null))
+      .catch(() => setCurrentUser(null));
     fetchOrders();
   }, []);
 
   useEffect(() => {
-    if (selectedOrder) fetchTasks(selectedOrder);
-  }, [selectedOrder]);
+    // If ?po=... in URL, select that PO
+    const params = new URLSearchParams(location.search);
+    const poId = params.get('po');
+    if (poId && orders.some(o => o._id === poId)) {
+      setSelectedOrder(poId);
+    } else if (orders.length > 0 && !selectedOrder) {
+      setSelectedOrder(orders[0]._id);
+    }
+    // eslint-disable-next-line
+  }, [orders, location.search]);
+
+  useEffect(() => {
+    if (showAllTasks) {
+      fetchAllTasks();
+    } else if (selectedOrder) {
+      fetchTasks(selectedOrder);
+    }
+    // eslint-disable-next-line
+  }, [showAllTasks, selectedOrder]);
 
   const fetchOrders = async () => {
     try {
@@ -38,6 +63,19 @@ export default function TaskManagementPage() {
     } catch {
       setTasks([]);
       toast.error('Failed to fetch tasks');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchAllTasks = async () => {
+    setLoading(true);
+    try {
+      const data = await apiRequest('/api/tasks');
+      setTasks(Array.isArray(data) ? data : []);
+    } catch {
+      setTasks([]);
+      toast.error('Failed to fetch all tasks');
     } finally {
       setLoading(false);
     }
@@ -89,6 +127,7 @@ export default function TaskManagementPage() {
             value={selectedOrder}
             onChange={(e) => setSelectedOrder(e.target.value)}
             className="input-field"
+            disabled={showAllTasks}
           >
             {orders.map((order) => (
               <option key={order._id} value={order._id}>
@@ -97,8 +136,17 @@ export default function TaskManagementPage() {
             ))}
           </select>
         </div>
+        <button
+          className="btn btn-secondary"
+          onClick={() => setShowAllTasks((prev) => !prev)}
+        >
+          {showAllTasks ? 'Show Tasks for Selected PO' : 'Show All Tasks'}
+        </button>
       </div>
-      <TaskForm orders={orders} onSubmit={handleCreateTask} />
+      {/* Only show TaskForm for non-user roles */}
+      {currentUser?.role !== 'user' && (
+        <TaskForm orders={orders} onSubmit={handleCreateTask} userRole={currentUser?.role} selectedOrder={selectedOrder} />
+      )}
       <TaskTable tasks={tasks} onStatusChange={handleStatusChange} />
     </div>
   );

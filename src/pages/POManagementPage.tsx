@@ -3,6 +3,7 @@ import { apiRequest } from '../api';
 import toast from 'react-hot-toast';
 import dayjs from 'dayjs';
 import React from 'react';
+import { useNavigate } from 'react-router-dom';
 
 interface PurchaseOrder {
   id: string;
@@ -38,6 +39,7 @@ export default function POManagementPage() {
     details: '',
     deadline: ''
   });
+  const navigate = useNavigate();
 
   useEffect(() => {
     setCurrentUser(JSON.parse(localStorage.getItem('user') || '{}'));
@@ -292,7 +294,7 @@ export default function POManagementPage() {
                   )}
                   {/* Create Task: only for manager, processing, not cancelled/delivered */}
                   {currentUser?.role === 'manager' && order.status === 'processing' && !isInactive(order) && (
-                    <button onClick={() => openTaskModal(order.id)} className="btn-primary btn-xs">Create Task</button>
+                    <button onClick={() => navigate(`/tasks?po=${order.id}`)} className="btn-primary btn-xs">Create Task</button>
                   )}
                   {/* Create DO: only for user, processing, not cancelled/delivered, DO not created */}
                   {currentUser?.role === 'user' && order.status === 'processing' && !order.doCreated && !isInactive(order) && (
