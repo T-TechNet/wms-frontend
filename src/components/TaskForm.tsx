@@ -13,7 +13,6 @@ export interface TaskFormValues {
 interface TaskFormProps {
   orders: { _id: string; name?: string; orderNumber?: string }[];
   onSubmit: (values: TaskFormValues) => void;
-  userRole?: string;
   selectedOrder?: string;
 }
 
@@ -26,7 +25,7 @@ interface UserOption {
   email: string;
 }
 
-export const TaskForm: React.FC<TaskFormProps> = ({ orders, onSubmit, userRole, selectedOrder }) => {
+export const TaskForm: React.FC<TaskFormProps> = ({ orders, onSubmit, selectedOrder }) => {
   const [form, setForm] = useState<TaskFormValues>({
     orderId: selectedOrder || orders[0]?._id || '',
     type: typeOptions[0],

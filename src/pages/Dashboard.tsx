@@ -134,10 +134,10 @@ export default function Dashboard() {
             {stats?.lowStockProducts} products low in stock
           </p>
         </div>
-        {stats?.totalOrders !== undefined && (
+        {stats?.totalPOs !== undefined && (
           <div className="card bg-gradient-to-br from-secondary-500 to-secondary-600 text-white">
-            <h3 className="text-lg font-medium">Total Orders</h3>
-            <p className="text-3xl font-bold mt-2">{stats.totalOrders}</p>
+            <h3 className="text-lg font-medium">Total POs</h3>
+            <p className="text-3xl font-bold mt-2">{stats.totalPOs}</p>
           </div>
         )}
         {stats?.totalCustomers !== undefined && (
