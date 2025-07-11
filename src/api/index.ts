@@ -11,7 +11,8 @@ export interface ApiResponse<T = any> {
 }
 
 export interface User {
-  id: string;
+  _id: string;
+  id?: string; // Keep for backward compatibility
   name: string;
   email: string;
   role: 'superadmin' | 'manager' | 'user';
@@ -46,15 +47,28 @@ export async function apiRequest<T>(url: string, options: RequestInit = {}): Pro
   const token = localStorage.getItem('token');
   
   // Don't include Authorization header for login/logout endpoints
-  const isAuthEndpoint = url === '/login' || url === '/logout';
+  const isAuthEndpoint = url.includes('/auth/login') || url === '/api/auth/login' || url.includes('/auth/logout');
+  
+  console.log(`API Request to ${url}:`, {
+    method: options.method || 'GET',
+    isAuthEndpoint,
+    hasToken: !!token
+  });
+  
+  // Create headers, explicitly excluding Authorization for auth endpoints
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
-    ...(!isAuthEndpoint && token ? { Authorization: `Bearer ${token}` } : {}),
-    ...((options.headers as Record<string, string>) || {}),
+    'Accept': 'application/json',
+    ...(options.headers as Record<string, string> || {})
   };
+  
+  // Only add Authorization header if we have a token and it's not an auth endpoint
+  if (token && !isAuthEndpoint) {
+    headers['Authorization'] = `Bearer ${token}`;
+  }
 
   // Ensure no double slash and correct endpoint
-  let fullUrl = `${BASE_URL}${url}`;
+  let fullUrl = url.startsWith('http') ? url : `${BASE_URL}${url.startsWith('/') ? '' : '/'}${url}`;
   
   // Replace any singular endpoints with their plural forms
   Object.entries(ENDPOINT_MAP).forEach(([singular, plural]) => {
@@ -62,6 +76,8 @@ export async function apiRequest<T>(url: string, options: RequestInit = {}): Pro
       fullUrl = fullUrl.replace(singular, plural);
     }
   });
+  
+  console.log('Final request URL:', fullUrl);
 
   try {
     console.log('API Request:', {
@@ -73,29 +89,51 @@ export async function apiRequest<T>(url: string, options: RequestInit = {}): Pro
       },
       body: options.body,
     });
+    
+    // Don't include credentials for login endpoint to avoid CORS issues
+    const credentials = isAuthEndpoint ? 'same-origin' : 'include';
 
     const res = await fetch(fullUrl, {
       ...options,
       headers,
-      credentials: 'include',
+      credentials,
     });
 
-    const data = await res.json();
+    // For DELETE requests, handle empty responses
+    const isDeleteRequest = options.method === 'DELETE';
+    let data;
+    
+    try {
+      // Only try to parse JSON if there's content
+      const text = await res.text();
+      data = text ? JSON.parse(text) : {};
+    } catch (error) {
+      // If parsing fails but it's a successful DELETE, that's fine
+      if (isDeleteRequest && res.ok) {
+        data = {};
+      } else {
+        console.error('Failed to parse response:', error);
+        throw new ApiError(res.status, 'Invalid JSON response from server');
+      }
+    }
 
     console.log('API Response:', {
       url: fullUrl,
       status: res.status,
       ok: res.ok,
-      data,
+      data: isDeleteRequest && res.status === 204 ? '[No Content]' : data,
     });
 
     if (!res.ok) {
       // Handle authentication errors
       if (res.status === 401 || res.status === 403) {
         localStorage.removeItem('token');
-        if (url === '/login') {
+        if (url.includes('/auth/login')) {
           // Show backend error message for login
-          throw new ApiError(res.status, data?.message || 'Invalid email or password', data);
+          const errorMessage = data?.message || (res.status === 401 
+            ? 'Invalid email or password' 
+            : 'You do not have permission to access this resource');
+          throw new ApiError(res.status, errorMessage, data);
         } else {
           window.location.href = '/login';
           throw new ApiError(res.status, 'Session expired. Please login again.', data);
@@ -127,26 +165,80 @@ export async function apiRequest<T>(url: string, options: RequestInit = {}): Pro
 }
 
 export async function login(email: string, password: string): Promise<LoginResponse> {
-  console.log('Login attempt:', { email });
-
-  const result = await apiRequest<ApiResponse<{ token: string; user: User }>>('/login', {
-    method: 'POST',
-    body: JSON.stringify({ email, password })
-  });
-
-  if (result.status === 'success' && result.data?.token && result.data?.user) {
-    localStorage.setItem('token', result.data.token);
-    localStorage.setItem('role', result.data.user.role); // Store user role for filtering
-    console.log('Login successful:', { 
-      email,
-      role: result.data.user.role
+  try {
+    console.log('Attempting login with:', { email });
+    
+    const response = await fetch(`${BASE_URL}/login`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json',
+      },
+      body: JSON.stringify({ 
+        email: email.trim(),
+        password: password
+      }),
+      credentials: 'include',
     });
-    return {
-      token: result.data.token,
-      user: result.data.user
-    };
-  } else {
-    throw new Error(result.message || 'Login failed');
+
+    console.log('Login response status:', response.status);
+    
+    let data;
+    try {
+      data = await response.json();
+      console.log('Login response data:', data);
+    } catch (jsonError) {
+      console.error('Failed to parse login response:', jsonError);
+      throw new Error('Invalid response from server');
+    }
+
+    if (!response.ok) {
+      console.error('Login failed with status:', response.status, 'Data:', data);
+      throw new ApiError(
+        response.status, 
+        data?.message || `Login failed with status ${response.status}`,
+        data
+      );
+    }
+
+    if (!data.data?.token) {
+      console.error('No token in response:', data);
+      throw new Error('Authentication failed: No token received');
+    }
+
+    console.log('Login successful, token received');
+    const token = data.data.token;
+    const user = data.data.user;
+    
+    if (!token) {
+      throw new Error('No token received from server');
+    }
+    
+    localStorage.setItem('token', token);
+    
+    // Ensure user data is properly set
+    if (user) {
+      setUserForLogging(user);
+      return { token, user };
+    } else {
+      console.log('No user data in response, fetching user profile...');
+      // If user data is not in the response, fetch it
+      try {
+        const userResponse = await apiRequest<User>('/api/users/me');
+        setUserForLogging(userResponse);
+        return { token, user: userResponse };
+      } catch (userError) {
+        console.error('Failed to fetch user profile:', userError);
+        // Return partial data if we have a token but couldn't fetch user
+        return { token, user: { email } as User };
+      }
+    }
+  } catch (error) {
+    console.error('Login error:', error);
+    if (error instanceof ApiError) {
+      throw error;
+    }
+    throw new Error('Failed to login. Please try again.');
   }
 }
 

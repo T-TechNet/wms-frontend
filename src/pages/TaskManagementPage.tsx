@@ -14,6 +14,7 @@ export default function TaskManagementPage() {
   const [loading, setLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [showAllTasks, setShowAllTasks] = useState(false);
+  const [orderTasks, setOrderTasks] = useState<Record<string, Task[]>>({});
   const location = useLocation();
 
   useEffect(() => {
@@ -55,16 +56,60 @@ export default function TaskManagementPage() {
     }
   };
 
-  const fetchTasks = async (poId: string) => {
+  const fetchTasks = async (orderId: string) => {
     setLoading(true);
     try {
-      const data = await apiRequest(`/api/purchase-orders/${poId}/tasks`);
-      setTasks(Array.isArray(data) ? data : []);
-    } catch {
+      // Fetch tasks for the specific order
+      const tasksData = await apiRequest(`/api/purchase-orders/${orderId}/tasks`);
+      const tasks = Array.isArray(tasksData) ? tasksData : [];
+      
+      // Fetch all tasks to properly group them by order
+      const allTasksResponse = await apiRequest('/api/tasks');
+      const allTasks = Array.isArray(allTasksResponse) ? allTasksResponse : [];
+      
+      // Set tasks for the current view
+      setTasks(tasks);
+      
+      // Group all tasks by orderId
+      const tasksByOrder = allTasks.reduce((acc: Record<string, Task[]>, task: Task) => {
+        if (!acc[task.orderId]) {
+          acc[task.orderId] = [];
+        }
+        acc[task.orderId].push(task);
+        return acc;
+      }, {});
+      
+      setOrderTasks(tasksByOrder);
+      
+      // Debug logs
+      console.log('Fetched tasks:', {
+        currentOrderId: orderId,
+        currentOrderTasks: tasks,
+        allTasksByOrder: tasksByOrder,
+        currentOrderTasksInGroup: tasksByOrder[orderId] || []
+      });
+      
+    } catch (error) {
+      console.error('Error fetching tasks:', error);
+      toast.error('Failed to load tasks');
       setTasks([]);
-      toast.error('Failed to fetch tasks');
     } finally {
       setLoading(false);
+    }
+  };
+  
+  const handleSwitchToDO = async (orderId: string) => {
+    try {
+      const response = await apiRequest(`/api/purchase-orders/${orderId}/do`, { method: 'PATCH' });
+      if (response && response.doUrl) {
+        window.open(response.doUrl, '_blank');
+      }
+      toast.success('DO created successfully');
+      // Refresh orders to update the UI
+      fetchOrders();
+    } catch (err) {
+      console.error('Error creating DO:', err);
+      toast.error('Failed to create DO');
     }
   };
 
@@ -72,8 +117,28 @@ export default function TaskManagementPage() {
     setLoading(true);
     try {
       const data = await apiRequest('/api/tasks');
-      setTasks(Array.isArray(data) ? data : []);
-    } catch {
+      const tasks = Array.isArray(data) ? data : [];
+      
+      // Set all tasks for the current view
+      setTasks(tasks);
+      
+      // Group tasks by orderId for the orderTasks state
+      const tasksByOrder = tasks.reduce((acc: Record<string, Task[]>, task: Task) => {
+        if (!acc[task.orderId]) {
+          acc[task.orderId] = [];
+        }
+        acc[task.orderId].push(task);
+        return acc;
+      }, {});
+      
+      setOrderTasks(tasksByOrder);
+      
+      // Log task information for debugging
+      console.log('Fetched all tasks:', tasks);
+      console.log('Tasks by order:', tasksByOrder);
+      
+    } catch (error) {
+      console.error('Error fetching all tasks:', error);
       setTasks([]);
       toast.error('Failed to fetch all tasks');
     } finally {
@@ -107,6 +172,29 @@ export default function TaskManagementPage() {
       toast.success('Task status updated');
     } catch {
       toast.error('Failed to update status');
+    }
+  };
+
+  const handleDeleteTask = async (taskId: string) => {
+    try {
+      await apiRequest(`/api/tasks/${taskId}`, {
+        method: 'DELETE',
+      });
+      // Remove the deleted task from the tasks list
+      setTasks((prev) => prev.filter((t) => t._id !== taskId));
+      // Also update the orderTasks state if needed
+      setOrderTasks((prev) => {
+        const updated = { ...prev };
+        Object.keys(updated).forEach((orderId) => {
+          updated[orderId] = updated[orderId].filter((t) => t._id !== taskId);
+        });
+        return updated;
+      });
+      toast.success('Task deleted successfully');
+    } catch (error) {
+      console.error('Error deleting task:', error);
+      toast.error('Failed to delete task');
+      throw error; // Re-throw to show error in the TaskRow component
     }
   };
 
@@ -147,7 +235,17 @@ export default function TaskManagementPage() {
       {currentUser?.role !== 'user' && (
         <TaskForm orders={orders} onSubmit={handleCreateTask} selectedOrder={selectedOrder} />
       )}
-      <TaskTable tasks={tasks} onStatusChange={handleStatusChange} />
+      <div className="mt-4">
+        <TaskTable 
+          tasks={tasks} 
+          onStatusChange={handleStatusChange}
+          onDelete={handleDeleteTask}
+          currentUserId={currentUser?._id}
+          currentUserRole={currentUser?.role}
+          onSwitchToDO={handleSwitchToDO}
+          orderTasks={orderTasks}
+        />
+      </div>
     </div>
   );
 }

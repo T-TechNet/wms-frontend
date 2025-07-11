@@ -13,12 +13,16 @@ import {
 import ChangePasswordModal from './ChangePasswordModal';
 import AvatarUploadModal from './AvatarUploadModal';
 
+interface User {
+  _id: string;
+  name: string;
+  email: string;
+  role: string;
+}
+
 interface LayoutProps {
   children: React.ReactNode;
-  user: {
-    name: string;
-    role: string;
-  };
+  user: User | null;
   onLogout: () => void;
 }
 
@@ -41,6 +45,20 @@ export default function Layout({ children, user, onLogout }: LayoutProps) {
   const [showChangePassword, setShowChangePassword] = useState(false);
   const [showAvatarUpload, setShowAvatarUpload] = useState(false);
   const location = useLocation();
+
+  // If user is null, redirect to login or show a loading state
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <div className="flex items-center justify-center h-screen">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500 mx-auto"></div>
+            <p className="mt-4 text-gray-600">Loading user data...</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const filteredNavigation = navigation.filter(item => item.roles.includes(user.role));
 

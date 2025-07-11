@@ -1,46 +1,37 @@
 import React, { useState, useEffect } from 'react';
-import { login, type User, apiRequest } from '../api';
 import { useNavigate } from 'react-router-dom';
 import { toast } from 'react-hot-toast';
+import { useAuth } from '../context/AuthContext';
 
-export default function LoginPage({ onLogin }: { onLogin: (user: User) => void }) {
+export default function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
+  const { user, login } = useAuth();
   const navigate = useNavigate();
 
   // Redirect if already logged in
   useEffect(() => {
-    const token = localStorage.getItem('token');
-    if (token) {
+    if (user) {
       navigate('/dashboard', { replace: true });
     }
-  }, [navigate]);
+  }, [user, navigate]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setIsLoading(true);
+    if (!email || !password) {
+      toast.error('Please enter both email and password');
+      return;
+    }
 
+    setIsLoading(true);
     try {
-      const response = await login(email, password);
-      if (response.token) {
-        localStorage.setItem('token', response.token);
-        // Fetch user profile after login
-        const userProfile = await apiRequest('/api/users/me');
-        onLogin(userProfile as User);
-        toast.success('Login successful!');
-        navigate('/dashboard', { replace: true });
-      } else {
-        throw new Error('Invalid login response');
-      }
+      await login(email, password);
+      toast.success('Login successful!');
+      navigate('/dashboard', { replace: true });
     } catch (error: any) {
-      console.error('Login error:', {
-        error,
-        request: { email, password },
-        response: error?.data,
-        status: error?.status
-      });
-      const errorMessage = error.message || 'Login failed. Please try again.';
+      console.error('Login error:', error);
+      const errorMessage = error?.message || 'Login failed. Please try again.';
       toast.error(errorMessage);
     } finally {
       setIsLoading(false);
