@@ -14,6 +14,7 @@ import RoleManagementPage from './pages/RoleManagementPage';
 import UserProfilePage from './pages/UserProfilePage';
 import LogViewerPage from './pages/LogViewerPage';
 import DeliveryOrderPage from './pages/DeliveryOrderPage';
+import ViewDOPage from './pages/ViewDOPage';
 
 // This component handles the protected routes and layout
 const AppContent = () => {
@@ -148,6 +149,30 @@ const AppContent = () => {
               user ? (
                 <Layout user={user} onLogout={handleLogout}>
                   <LogViewerPage />
+                </Layout>
+              ) : (
+                <Navigate to="/login" replace />
+              )
+            }
+          />
+          <Route
+            path="/delivery-orders"
+            element={
+              user ? (
+                <Layout user={user} onLogout={handleLogout}>
+                  <DeliveryOrderPage />
+                </Layout>
+              ) : (
+                <Navigate to="/login" replace />
+              )
+            }
+          />
+          <Route
+            path="/delivery-orders/:doId"
+            element={
+              user ? (
+                <Layout user={user} onLogout={handleLogout}>
+                  <ViewDOPage />
                 </Layout>
               ) : (
                 <Navigate to="/login" replace />

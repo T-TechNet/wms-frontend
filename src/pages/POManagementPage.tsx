@@ -5,7 +5,8 @@ import dayjs from 'dayjs';
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ChevronDown } from 'lucide-react';
-import { X, Package, User, Calendar, FileText, AlertCircle, CheckCircle, Truck, Clock, DollarSign } from 'lucide-react';
+import { X, Package, User, Calendar, FileText, AlertCircle, CheckCircle, Truck, Clock, DollarSign, Eye } from 'lucide-react';
+import DOForm from '../components/DOForm';
 
 interface PurchaseOrder {
   id: string;
@@ -16,11 +17,17 @@ interface PurchaseOrder {
   notes?: string;
   status: 'pending' | 'processing' | 'shipping' | 'delivered' | 'cancelled';
   doCreated?: boolean;
+  doId?: string;  // Add DO ID field
   invoiceUrl?: string;
 }
 
 export default function POManagementPage() {
   const [orders, setOrders] = useState<PurchaseOrder[]>([]);
+  
+  // Log when orders change
+  useEffect(() => {
+    console.log('Orders updated:', orders);
+  }, [orders]);
   const [loading, setLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -35,7 +42,9 @@ export default function POManagementPage() {
   const [creating, setCreating] = useState(false);
   const [showTaskModal, setShowTaskModal] = useState(false);
   const [taskPOId, setTaskPOId] = useState<string | null>(null);
-  const [selectedOrder, setSelectedOrder] = useState<PurchaseOrder | null>(null);
+  const [selectedOrder, setSelectedOrder] = useState<PurchaseOrder & { doId?: string } | null>(null);
+  const [showDOForm, setShowDOForm] = useState(false);
+  const [currentPOId, setCurrentPOId] = useState<string | null>(null);
   const [showOrderDetails, setShowOrderDetails] = useState(false);
   const [orderTasks, setOrderTasks] = useState<Record<string, any[]>>({});
   const [newTask, setNewTask] = useState({
@@ -48,6 +57,13 @@ export default function POManagementPage() {
 
   useEffect(() => {
     setCurrentUser(JSON.parse(localStorage.getItem('user') || '{}'));
+  }, []);
+
+  useEffect(() => {
+    console.log('Selected order changed:', selectedOrder);
+  }, [selectedOrder]);
+
+  useEffect(() => {
     fetchOrders();
   }, []);
 
@@ -106,6 +122,25 @@ export default function POManagementPage() {
   // Helper to check if PO is cancelled or delivered
   const isInactive = (order: PurchaseOrder) => order.status === 'cancelled' || order.status === 'delivered';
 
+  const viewOrderDetails = async (order: PurchaseOrder) => {
+    try {
+      // If DO is created but we don't have the DO ID yet, fetch it
+      if (order.doCreated && !order.doId) {
+        const data = await apiRequest<{id: string}[]>(`/api/delivery-orders?poId=${order.id}`);
+        if (data && data.length > 0) {
+          order = { ...order, doId: data[0].id };
+        }
+      }
+      setSelectedOrder(order);
+      setShowOrderDetails(true);
+    } catch (error) {
+      console.error('Error fetching DO ID:', error);
+      toast.error('Failed to load delivery order information');
+      setSelectedOrder(order);
+      setShowOrderDetails(true);
+    }
+  };
+
   const showApiError = (err: any, fallback: string) => {
     if (err && err.data && err.data.message) toast.error(err.data.message);
     else if (err && err.message) toast.error(err.message);
@@ -122,17 +157,71 @@ export default function POManagementPage() {
     }
   };
 
-  const handleCreateDO = async (id: string) => {
-    try {
-      const response = await apiRequest(`/api/purchase-orders/${id}/do`, { method: 'PATCH' });
-      if (response && response.doUrl) {
-        // If we get a DO URL, open it in a new tab
-        window.open(response.doUrl, '_blank');
+  const handleCreateDO = (id: string) => {
+    setCurrentPOId(id);
+    setShowDOForm(true);
+  };
+
+  const handleDOSuccess = (doId?: string | null, responseData?: any) => {
+    console.log('handleDOSuccess called with:', { doId, responseData });
+    console.log('currentPOId:', currentPOId);
+    
+    if (!currentPOId) {
+      console.error('No currentPOId found when handling DO success');
+      toast.error('Error: No purchase order selected');
+      return;
+    }
+    
+    // Extract DO ID from response data if not provided directly
+    const resolvedDoId = doId || 
+                        (responseData?.order?.id) || 
+                        (responseData?.order?.doId) ||
+                        (responseData?.id) ||
+                        (responseData?.doId);
+    
+    if (!resolvedDoId) {
+      console.error('No DO ID found in response or parameters:', { doId, responseData });
+      toast.error('Error: Could not create delivery order - missing ID');
+      return;
+    }
+    
+    console.log('Updating order with DO ID:', { currentPOId, resolvedDoId });
+    
+    setOrders(prevOrders => {
+      const orderIndex = prevOrders.findIndex(order => order.id === currentPOId);
+      if (orderIndex === -1) {
+        console.error('Order not found:', currentPOId);
+        return prevOrders;
       }
-      toast.success('DO created');
-      fetchOrders();
-    } catch (err: any) {
-      showApiError(err, 'Failed to create/switch DO');
+      
+      const updatedOrders = [...prevOrders];
+      updatedOrders[orderIndex] = {
+        ...updatedOrders[orderIndex],
+        doCreated: true,
+        doId: resolvedDoId
+      };
+      
+      console.log('Order after update:', updatedOrders[orderIndex]);
+      return updatedOrders;
+    });
+    
+    // Also update selectedOrder if it's the current one
+    if (selectedOrder?.id === currentPOId) {
+      setSelectedOrder(prev => ({
+        ...prev!,
+        doCreated: true,
+        doId: resolvedDoId
+      }));
+    }
+    
+    toast.success('Delivery Order created successfully');
+    setShowDOForm(false);
+    setCurrentPOId(null);
+    
+    // If we have a redirect URL in the response, navigate to it
+    if (responseData?.redirectUrl) {
+      console.log('Navigating to:', responseData.redirectUrl);
+      navigate(responseData.redirectUrl);
     }
   };
 
@@ -300,6 +389,29 @@ export default function POManagementPage() {
 
   return (
     <div className="space-y-6">
+      {/* DO Form Modal */}
+      {showDOForm && currentPOId && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] overflow-y-auto">
+            <div className="flex justify-between items-center p-4 border-b">
+              <h2 className="text-xl font-semibold">Create Delivery Order</h2>
+              <button 
+                onClick={() => setShowDOForm(false)}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <X className="w-6 h-6" />
+              </button>
+            </div>
+            <div className="p-6">
+              <DOForm 
+                poId={currentPOId} 
+                onClose={() => setShowDOForm(false)} 
+                onSuccess={handleDOSuccess} 
+              />
+            </div>
+          </div>
+        </div>
+      )}
       <div className="flex items-center justify-between">
         <h2 className="text-xl font-bold">Purchase Orders</h2>
         <button className="btn-primary" onClick={openCreateModal}>+ Create PO</button>
@@ -422,18 +534,28 @@ export default function POManagementPage() {
                   {currentUser?.role === 'user' && order.status === 'processing' && !isInactive(order) && (
                     <>
                       {order.doCreated ? (
-                        <button 
-                          onClick={() => handleCreateDO(order.id)}
-                          className="btn-warning btn-xs whitespace-nowrap bg-yellow-500 hover:bg-yellow-600"
-                        >
-                          Switch to DO
-                        </button>
+                        <>
+                          <button 
+                            onClick={() => navigate(`/delivery-orders/${order.doId}`)}
+                            className="btn-primary btn-xs whitespace-nowrap flex items-center gap-1"
+                            title="View Delivery Order"
+                          >
+                            <Eye className="w-3 h-3" />
+                            View DO
+                          </button>
+                          <button 
+                            onClick={() => handleCreateDO(order.id)}
+                            className="btn-warning btn-xs whitespace-nowrap"
+                          >
+                            Switch to DO
+                          </button>
+                        </>
                       ) : areAllTasksCompleted(order.id) ? (
                         <button 
                           onClick={() => handleCreateDO(order.id)}
                           className="btn-warning btn-xs whitespace-nowrap bg-yellow-500 hover:bg-yellow-600"
                         >
-                          Switch to DO
+                          Create DO
                         </button>
                       ) : (
                         <div className="dropdown dropdown-hover">
@@ -455,7 +577,7 @@ export default function POManagementPage() {
                   {currentUser?.role === 'user' && order.status === 'shipping' && !isInactive(order) && (
                     <button onClick={() => handleAdvance(order.id, 'delivered')} className="btn-primary btn-xs">Mark as Delivered</button>
                   )}
-                  {/* Complete and Switch DO: for user, delivered, not cancelled */}
+                  {/* Complete and Switch/View DO: for user, delivered, not cancelled */}
                   {console.log('Rendering order:', order.id, 'status:', order.status, 'doCreated:', order.doCreated, 'isInactive:', isInactive(order), 'user role:', currentUser?.role)}
                   {currentUser?.role === 'user' && order.status === 'delivered' && !isInactive(order) && (
                     <div className="flex flex-wrap gap-2">
@@ -467,10 +589,17 @@ export default function POManagementPage() {
                         Complete
                       </button>
                       
-                      {/* Debug info */}
-                      <div className="text-xs text-gray-500">
-                        DO Created: {order.doCreated ? 'Yes' : 'No'}
-                      </div>
+                      {/* View DO button - show if DO is created */}
+                      {order.doCreated && (
+                        <button 
+                          onClick={() => navigate(`/delivery-orders/${order.id}`)}
+                          className="btn-primary btn-xs whitespace-nowrap flex items-center gap-1"
+                          title="View Delivery Order"
+                        >
+                          <Eye className="w-3 h-3" />
+                          View DO
+                        </button>
+                      )}
                       
                       {/* Switch to DO button - show if DO is created */}
                       {order.doCreated && (
@@ -568,25 +697,69 @@ export default function POManagementPage() {
                   </h3>
                   <div className="pl-6 space-y-1">
                     <p><span className="text-gray-500">Delivery Date:</span> {selectedOrder.deliveryDate ? dayjs(selectedOrder.deliveryDate).format('YYYY-MM-DD') : 'Not set'}</p>
-                    <p className="flex items-center">
+                    <div className="flex items-center">
                       <span className="text-gray-500">DO Created:</span> 
-                      {selectedOrder.doCreated ? (
-                        <CheckCircle className="w-4 h-4 text-green-500 ml-2" />
+                      {(selectedOrder.doCreated || selectedOrder.status === 'Yes') ? (
+                        <>
+                          <CheckCircle className="w-4 h-4 text-green-500 ml-2" />
+                          <span className="text-xs text-gray-500 ml-1">
+                            Yes (ID: {selectedOrder.doId || 'N/A'})
+                          </span>
+                        </>
                       ) : (
                         <AlertCircle className="w-4 h-4 text-yellow-500 ml-2" />
                       )}
-                    </p>
-                    {selectedOrder.invoiceUrl && (
-                      <a 
-                        href={selectedOrder.invoiceUrl} 
-                        target="_blank" 
-                        rel="noopener noreferrer"
-                        className="text-blue-600 hover:underline flex items-center gap-1"
-                      >
-                        <FileText className="w-4 h-4" />
-                        View Invoice
-                      </a>
-                    )}
+                    </div>
+                    <div className="mt-3 space-y-2">
+                      {(selectedOrder.doCreated || selectedOrder.status === 'Yes') && selectedOrder.doId && (
+                        <div className="w-full">
+                          <button
+                            onClick={() => {
+                              setShowOrderDetails(false);
+                              navigate(`/delivery-orders/${selectedOrder.doId}`);
+                            }}
+                            className="w-full bg-blue-50 hover:bg-blue-100 text-blue-700 font-medium py-2 px-4 rounded-md border border-blue-200 flex items-center justify-center gap-2 transition-colors duration-200"
+                          >
+                            <Truck className="w-5 h-5" />
+                            <span>View Delivery Order</span>
+                            <span className="ml-auto bg-blue-100 text-blue-800 text-xs font-semibold px-2.5 py-0.5 rounded-full">
+                              DO #{selectedOrder.doId.slice(-6).toUpperCase()}
+                            </span>
+                          </button>
+                          <p className="mt-1 text-xs text-gray-500 text-center">
+                            Click to view full delivery order details
+                          </p>
+                        </div>
+                      )}
+                      {selectedOrder.invoiceUrl && (
+                        <a 
+                          href={selectedOrder.invoiceUrl} 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="text-blue-600 hover:underline flex items-center gap-1 text-sm"
+                        >
+                          <FileText className="w-4 h-4" />
+                          View Invoice
+                        </a>
+                      )}
+                      {selectedOrder.doCreated && (
+                        <button
+                          onClick={() => {
+                            setShowOrderDetails(false);
+                            if (selectedOrder.doId) {
+                              navigate(`/delivery-orders/${selectedOrder.doId}`);
+                            } else {
+                              toast.error('Delivery Order ID not found');
+                            }
+                          }}
+                          className="text-blue-600 hover:underline flex items-center gap-1 text-sm"
+                          disabled={!selectedOrder.doId}
+                        >
+                          <Eye className="w-4 h-4" />
+                          View Delivery Order
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
               </div>
@@ -643,9 +816,23 @@ export default function POManagementPage() {
                     <FileText className="w-4 h-4" />
                     Order Notes
                   </h3>
-                  <div className="bg-gray-50 p-4 rounded-lg border border-gray-200">
-                    <p className="whitespace-pre-line">{selectedOrder.notes}</p>
-                  </div>
+                  <div className="mt-6 border-t pt-4">
+                <h3 className="font-medium text-gray-700 mb-2">Notes</h3>
+                <p className="text-gray-600 whitespace-pre-wrap">{selectedOrder.notes || 'No notes available'}</p>
+              </div>
+              
+              {/* Debug Section - Can be removed in production */}
+              <div className="mt-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
+                <h3 className="font-medium text-gray-700 mb-2">Debug Information</h3>
+                <pre className="text-xs text-gray-600 overflow-x-auto">
+                  {JSON.stringify({
+                    orderId: selectedOrder.id,
+                    doCreated: selectedOrder.doCreated,
+                    doId: selectedOrder.doId,
+                    hasViewDOButton: selectedOrder.doCreated && selectedOrder.doId
+                  }, null, 2)}
+                </pre>
+              </div>
                 </div>
               )}
             </div>

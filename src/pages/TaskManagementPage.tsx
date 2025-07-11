@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { apiRequest } from '../api';
 import toast from 'react-hot-toast';
 import { TaskForm } from '../components/TaskForm';
+import DOForm from '../components/DOForm';
 import type { TaskFormValues } from '../components/TaskForm';
 import { TaskTable } from '../components/TaskTable';
 import type { Task } from '../components/TaskTable';
@@ -98,18 +99,25 @@ export default function TaskManagementPage() {
     }
   };
   
-  const handleSwitchToDO = async (orderId: string) => {
-    try {
-      const response = await apiRequest(`/api/purchase-orders/${orderId}/do`, { method: 'PATCH' });
-      if (response && response.doUrl) {
-        window.open(response.doUrl, '_blank');
-      }
-      toast.success('DO created successfully');
-      // Refresh orders to update the UI
-      fetchOrders();
-    } catch (err) {
-      console.error('Error creating DO:', err);
-      toast.error('Failed to create DO');
+  const [showDOForm, setShowDOForm] = useState(false);
+  const [selectedPoId, setSelectedPoId] = useState<string | null>(null);
+
+  const handleOpenDOForm = (poId: string) => {
+    setSelectedPoId(poId);
+    setShowDOForm(true);
+  };
+
+  const handleCloseDOForm = () => {
+    setShowDOForm(false);
+    setSelectedPoId(null);
+  };
+
+  const handleDOSuccess = () => {
+    // Refresh orders to update the UI
+    fetchOrders();
+    // Refresh tasks if needed
+    if (selectedOrder) {
+      fetchTasks(selectedOrder);
     }
   };
 
@@ -242,9 +250,17 @@ export default function TaskManagementPage() {
           onDelete={handleDeleteTask}
           currentUserId={currentUser?._id}
           currentUserRole={currentUser?.role}
-          onSwitchToDO={handleSwitchToDO}
+          onSwitchToDO={handleOpenDOForm}
           orderTasks={orderTasks}
         />
+        
+        {showDOForm && selectedPoId && (
+          <DOForm 
+            poId={selectedPoId} 
+            onClose={handleCloseDOForm} 
+            onSuccess={handleDOSuccess}
+          />
+        )}
       </div>
     </div>
   );
