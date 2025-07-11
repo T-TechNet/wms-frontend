@@ -5,7 +5,7 @@ import dayjs from 'dayjs';
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ChevronDown } from 'lucide-react';
-import { X, Package, User, Calendar, FileText, AlertCircle, CheckCircle, Truck, Clock, DollarSign, Eye } from 'lucide-react';
+import { X, Package, User, Calendar, FileText, AlertCircle, CheckCircle, Truck, Eye } from 'lucide-react';
 import DOForm from '../components/DOForm';
 
 interface PurchaseOrder {
@@ -15,7 +15,7 @@ interface PurchaseOrder {
   date: string;
   deliveryDate: string;
   notes?: string;
-  status: 'pending' | 'processing' | 'shipping' | 'delivered' | 'cancelled';
+  status: 'pending' | 'processing' | 'shipping' | 'delivered' | 'cancelled' | 'Yes';
   doCreated?: boolean;
   doId?: string;  // Add DO ID field
   invoiceUrl?: string;
@@ -45,6 +45,13 @@ export default function POManagementPage() {
   const [selectedOrder, setSelectedOrder] = useState<PurchaseOrder & { doId?: string } | null>(null);
   const [showDOForm, setShowDOForm] = useState(false);
   const [currentPOId, setCurrentPOId] = useState<string | null>(null);
+  const [currentDOData, setCurrentDOData] = useState<any>(null);
+  const [isLoadingDO, setIsLoadingDO] = useState(false);
+  
+  // Debug effect for modal state
+  useEffect(() => {
+    console.log('Modal State:', { showDOForm, currentPOId, isLoadingDO, hasDOData: !!currentDOData });
+  }, [showDOForm, currentPOId, isLoadingDO, currentDOData]);
   const [showOrderDetails, setShowOrderDetails] = useState(false);
   const [orderTasks, setOrderTasks] = useState<Record<string, any[]>>({});
   const [newTask, setNewTask] = useState({
@@ -124,7 +131,7 @@ export default function POManagementPage() {
 
   const viewOrderDetails = async (order: PurchaseOrder) => {
     try {
-      // If DO is created but we don't have the DO ID yet, fetch it
+      // If order has doCreated but no doId, try to fetch it
       if (order.doCreated && !order.doId) {
         const data = await apiRequest<{id: string}[]>(`/api/delivery-orders?poId=${order.id}`);
         if (data && data.length > 0) {
@@ -141,10 +148,26 @@ export default function POManagementPage() {
     }
   };
 
-  const showApiError = (err: any, fallback: string) => {
-    if (err && err.data && err.data.message) toast.error(err.data.message);
-    else if (err && err.message) toast.error(err.message);
-    else toast.error(fallback);
+  // Helper function to show API errors
+  const showApiError = (error: unknown, fallback: string) => {
+    let errorMessage = fallback;
+    
+    if (error && typeof error === 'object') {
+      // Handle Axios error format
+      if ('response' in error && error.response && typeof error.response === 'object') {
+        const responseData = (error.response as { data?: { message?: string } }).data;
+        if (responseData?.message) {
+          errorMessage = responseData.message;
+        }
+      } 
+      // Handle standard Error objects
+      else if ('message' in error && typeof error.message === 'string') {
+        errorMessage = error.message;
+      }
+    }
+    
+    toast.error(errorMessage);
+    console.error('API Error:', error);
   };
 
   const handleApprove = async (id: string) => {
@@ -162,7 +185,31 @@ export default function POManagementPage() {
     setShowDOForm(true);
   };
 
-  const handleDOSuccess = (doId?: string | null, responseData?: any) => {
+  interface DOResponseData {
+    order?: {
+      _id?: string;
+      id?: string;
+      doId?: string;
+    };
+    _id?: string;
+    id?: string;
+    doId?: string;
+    redirectUrl?: string;
+  }
+
+  interface DOResponseData {
+    order?: {
+      _id?: string;
+      id?: string;
+      doId?: string;
+    };
+    _id?: string;
+    id?: string;
+    doId?: string;
+    redirectUrl?: string;
+  }
+
+  const handleDOSuccess = (doId?: string | null, responseData?: unknown) => {
     console.log('handleDOSuccess called with:', { doId, responseData });
     console.log('currentPOId:', currentPOId);
     
@@ -172,40 +219,50 @@ export default function POManagementPage() {
       return;
     }
     
+    // Safely parse the response data
+    let parsedData: DOResponseData = {};
+    try {
+      // If responseData is a string, parse it as JSON
+      if (typeof responseData === 'string') {
+        parsedData = JSON.parse(responseData) as DOResponseData;
+      } else if (typeof responseData === 'object' && responseData !== null) {
+        // If it's already an object, use it directly
+        parsedData = responseData as DOResponseData;
+      }
+    } catch (error) {
+      console.error('Error parsing response data:', error);
+    }
+    
     // Extract DO ID from response data if not provided directly
     const resolvedDoId = doId || 
-                        (responseData?.order?.id) || 
-                        (responseData?.order?.doId) ||
-                        (responseData?.id) ||
-                        (responseData?.doId);
+                        parsedData?.order?._id || // MongoDB uses _id
+                        parsedData?.order?.id || 
+                        parsedData?.order?.doId ||
+                        parsedData?._id || // Check for _id at root level
+                        parsedData?.id ||
+                        parsedData?.doId;
     
     if (!resolvedDoId) {
-      console.error('No DO ID found in response or parameters:', { doId, responseData });
+      console.error('No DO ID found in response or parameters:', { doId, parsedData });
       toast.error('Error: Could not create delivery order - missing ID');
       return;
     }
     
-    console.log('Updating order with DO ID:', { currentPOId, resolvedDoId });
-    
+    // Update the orders list with the new DO information
     setOrders(prevOrders => {
-      const orderIndex = prevOrders.findIndex(order => order.id === currentPOId);
-      if (orderIndex === -1) {
-        console.error('Order not found:', currentPOId);
-        return prevOrders;
-      }
-      
-      const updatedOrders = [...prevOrders];
-      updatedOrders[orderIndex] = {
-        ...updatedOrders[orderIndex],
-        doCreated: true,
-        doId: resolvedDoId
-      };
-      
-      console.log('Order after update:', updatedOrders[orderIndex]);
-      return updatedOrders;
+      return prevOrders.map(order => {
+        if (order.id === currentPOId) {
+          return { 
+            ...order, 
+            doCreated: true, 
+            doId: resolvedDoId 
+          };
+        }
+        return order;
+      });
     });
     
-    // Also update selectedOrder if it's the current one
+    // Also update the selected order if it's the current one
     if (selectedOrder?.id === currentPOId) {
       setSelectedOrder(prev => ({
         ...prev!,
@@ -217,11 +274,12 @@ export default function POManagementPage() {
     toast.success('Delivery Order created successfully');
     setShowDOForm(false);
     setCurrentPOId(null);
+    setCurrentDOData(null);
     
-    // If we have a redirect URL in the response, navigate to it
-    if (responseData?.redirectUrl) {
-      console.log('Navigating to:', responseData.redirectUrl);
-      navigate(responseData.redirectUrl);
+    // Handle redirect if needed
+    if (parsedData.redirectUrl) {
+      console.log('Navigating to:', parsedData.redirectUrl);
+      navigate(parsedData.redirectUrl);
     }
   };
 
@@ -390,25 +448,63 @@ export default function POManagementPage() {
   return (
     <div className="space-y-6">
       {/* DO Form Modal */}
-      {showDOForm && currentPOId && (
-        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
-          <div className="bg-white rounded-lg shadow-xl w-full max-w-4xl max-h-[90vh] overflow-y-auto">
-            <div className="flex justify-between items-center p-4 border-b">
-              <h2 className="text-xl font-semibold">Create Delivery Order</h2>
-              <button 
-                onClick={() => setShowDOForm(false)}
-                className="text-gray-500 hover:text-gray-700"
-              >
-                <X className="w-6 h-6" />
-              </button>
-            </div>
-            <div className="p-6">
-              <DOForm 
-                poId={currentPOId} 
-                onClose={() => setShowDOForm(false)} 
-                onSuccess={handleDOSuccess} 
-              />
-            </div>
+      {showDOForm && (
+        <div 
+          className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4"
+          onClick={() => {
+            console.log('Modal background clicked');
+            setShowDOForm(false);
+          }}
+        >
+          <div 
+            className="bg-white rounded-lg shadow-xl w-full max-w-4xl my-8 max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {isLoadingDO ? (
+              <div className="p-8 text-center">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500 mx-auto mb-4"></div>
+                <p>Loading delivery order data...</p>
+                <p className="text-sm text-gray-500 mt-2">PO ID: {currentPOId}</p>
+              </div>
+            ) : currentPOId ? (
+              <>
+                {console.log('Rendering DOForm with props:', { 
+                  poId: currentPOId, 
+                  hasDoData: !!currentDOData,
+                  doDataKeys: currentDOData ? Object.keys(currentDOData) : [] 
+                })}
+                <DOForm 
+                  key={`do-form-${currentPOId}-${currentDOData?.id || 'new'}`}
+                  poId={currentPOId} 
+                  doData={currentDOData}
+                  onClose={() => {
+                    console.log('Closing DO form');
+                    setShowDOForm(false);
+                    setCurrentPOId(null);
+                    setCurrentDOData(null);
+                    setIsLoadingDO(false);
+                  }} 
+                  onSuccess={(doId, responseData) => {
+                    console.log('DO form submitted successfully', { doId, responseData });
+                    handleDOSuccess(doId, responseData);
+                    setShowDOForm(false);
+                    setCurrentPOId(null);
+                    setCurrentDOData(null);
+                    setIsLoadingDO(false);
+                  }}
+                />
+              </>
+            ) : (
+              <div className="p-8 text-center">
+                <p className="text-red-500">Error: Missing purchase order ID</p>
+                <button 
+                  onClick={() => setShowDOForm(false)}
+                  className="mt-4 px-4 py-2 bg-gray-200 rounded hover:bg-gray-300"
+                >
+                  Close
+                </button>
+              </div>
+            )}
           </div>
         </div>
       )}
@@ -589,16 +685,77 @@ export default function POManagementPage() {
                         Complete
                       </button>
                       
-                      {/* View DO button - show if DO is created */}
-                      {order.doCreated && (
-                        <button 
-                          onClick={() => navigate(`/delivery-orders/${order.id}`)}
-                          className="btn-primary btn-xs whitespace-nowrap flex items-center gap-1"
-                          title="View Delivery Order"
-                        >
-                          <Eye className="w-3 h-3" />
-                          View DO
-                        </button>
+                      {/* View DO button */}
+                      {order.doCreated && order.doId ? (
+                        <div className="relative z-50">
+                          <button 
+                            onClick={async (e) => {
+                              e.stopPropagation();
+                              console.log('View DO button clicked for order:', order.id);
+                              
+                              // Set loading state and show form
+                              setIsLoadingDO(true);
+                              setShowDOForm(true);
+                              setCurrentPOId(order.id);
+                              
+                              try {
+                                const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080';
+                                console.log(`Fetching DO data for ID: ${order.doId}`);
+                                
+                                const response = await fetch(`${API_BASE_URL}/api/delivery-orders/${order.doId}`, {
+                                  method: 'GET',
+                                  headers: { 
+                                    'Authorization': `Bearer ${localStorage.getItem('token')}`,
+                                    'Content-Type': 'application/json',
+                                    'Accept': 'application/json'
+                                  }
+                                });
+                                
+                                console.log('DO fetch response status:', response.status);
+                                
+                                if (!response.ok) {
+                                  const errorText = await response.text();
+                                  console.error('Failed to fetch DO:', response.status, response.statusText, errorText);
+                                  throw new Error(`Failed to load delivery order: ${response.status} ${response.statusText}`);
+                                }
+                                
+                                const doData = await response.json();
+                                console.log('Fetched DO data:', doData);
+                                
+                                // Ensure we have the expected data structure
+                                const formattedData = {
+                                  ...doData,
+                                  // Ensure items array is properly formatted
+                                  items: Array.isArray(doData.items) ? doData.items : [],
+                                  // Map any other fields that might have different names
+                                  doNumber: doData.doNumber || doData.do_number || '',
+                                  doDate: doData.doDate || doData.do_date || doData.createdAt,
+                                  supplierName: doData.supplierName || doData.supplier_name || '',
+                                  supplierNumber: doData.supplierNumber || doData.supplier_number || '',
+                                  deliveryAddress: doData.deliveryAddress || doData.delivery_address || ''
+                                };
+                                
+                                console.log('Formatted DO data:', formattedData);
+                                setCurrentDOData(formattedData);
+                              } catch (error) {
+                                console.error('Error fetching DO:', error);
+                                toast.error(error instanceof Error ? error.message : 'Error loading delivery order');
+                                setShowDOForm(false);
+                              } finally {
+                                setIsLoadingDO(false);
+                              }
+                            }}
+                            className="btn btn-primary btn-xs flex items-center gap-1"
+                            title="View Delivery Order"
+                          >
+                            <Eye className="w-3 h-3" />
+                            View DO
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="text-xs text-gray-500">
+                          {!order.doCreated ? 'DO not created' : 'DO ID missing'}
+                        </div>
                       )}
                       
                       {/* Switch to DO button - show if DO is created */}
@@ -714,9 +871,36 @@ export default function POManagementPage() {
                       {(selectedOrder.doCreated || selectedOrder.status === 'Yes') && selectedOrder.doId && (
                         <div className="w-full">
                           <button
-                            onClick={() => {
-                              setShowOrderDetails(false);
-                              navigate(`/delivery-orders/${selectedOrder.doId}`);
+                            onClick={async () => {
+                              try {
+                                setShowOrderDetails(false);
+                                setCurrentPOId(selectedOrder.id);
+                                
+                                // Fetch the DO details
+                                const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080';
+                                const response = await fetch(`${API_BASE_URL}/api/delivery-orders/${selectedOrder.doId}`, {
+                                  headers: {
+                                    'Authorization': `Bearer ${localStorage.getItem('token')}`
+                                  }
+                                });
+                                
+                                if (!response.ok) {
+                                  throw new Error('Failed to fetch delivery order');
+                                }
+                                
+                                const doData = await response.json();
+                                
+                                // Store the DO data in state
+                                setCurrentDOData(doData);
+                                
+                                // Open the DO form in view mode
+                                setShowDOForm(true);
+                                
+                              } catch (error) {
+                                console.error('Error loading delivery order:', error);
+                                toast.error('Failed to load delivery order');
+                                setShowOrderDetails(true);
+                              }
                             }}
                             className="w-full bg-blue-50 hover:bg-blue-100 text-blue-700 font-medium py-2 px-4 rounded-md border border-blue-200 flex items-center justify-center gap-2 transition-colors duration-200"
                           >
